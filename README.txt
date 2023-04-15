@@ -11,10 +11,10 @@ datetime
 requests
 statsmodels
 numpy
-You can install these packages using pip:
 
-Copy code
+You can install these packages using pip:
 pip install pandas datetime requests statsmodels numpy
+
 Usage
 To use the program, simply run the script in a Python environment. 
 Make sure to modify the key and ticker variables at the top of the script to the desired Alpha Vantage API key and stock ticker, respectively.

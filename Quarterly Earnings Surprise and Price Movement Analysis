@@ -1,0 +1,90 @@
+import pandas as pd
+from datetime import datetime
+import requests
+import statsmodels.api as sm
+import statsmodels.stats.diagnostic as smd
+from statsmodels.stats.diagnostic import het_breuschpagan
+import numpy 
+
+key = "QKWL0ES6ZPIT4U01"
+ticker = "MSFT"
+
+
+
+url = f'https://www.alphavantage.co/query?function=EARNINGS&symbol={ticker}&apikey={key}'
+r = requests.get(url)
+data = r.json()
+
+earnings_df = pd.DataFrame(data['quarterlyEarnings'])
+earnings_date_raw = list(earnings_df['reportedDate'])
+surprisePercentage = list(earnings_df['surprisePercentage'])
+earnings_date = [datetime.strptime(date, '%Y-%m-%d').date() for date in earnings_date_raw]
+
+
+url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol={ticker}&outputsize=full&apikey={key}'
+r = requests.get(url)
+data = r.json()
+price_procent = []
+closing_prices = []
+previous_closing_prices = []
+previous_closing_price = None
+closing_price = None
+list_date = []
+list_date_to_merge = []
+surprises = []
+for date in earnings_date:
+        for key, value in data["Time Series (Daily)"].items(): 
+            try:               
+                if datetime.strptime(key, '%Y-%m-%d').date() == date:
+                    closing_price = float(value['4. close'])
+                    closing_prices.append(closing_price)
+                    previous_closing_prices.append(previous_closing_price)
+                    list_date.append(date)
+            except:
+                pass
+            try: 
+                if(datetime.strptime(key, '%Y-%m-%d').date()):
+                    previous_closing_price =  float(value['4. close'])
+            except: 
+                pass
+
+for i in range(len(closing_prices)):
+    price_change_pct = round(((closing_prices[i] - previous_closing_prices[i]) / previous_closing_prices[i] * 100),2)
+    price_procent.append(float(price_change_pct))
+
+last_date = list_date[-1]
+earnings_df['reportedDate'] = pd.to_datetime(earnings_df['reportedDate'])
+earnings_data = earnings_df[earnings_df['reportedDate'].dt.date >= last_date]
+
+price_data = pd.DataFrame(zip(list_date, price_procent))
+price_data = price_data.rename(columns={0: 'reportedDate', 1: 'PricePercentageChange'})
+price_data['reportedDate'] = pd.to_datetime(price_data['reportedDate'])
+
+
+
+data = pd.merge(earnings_data, price_data, on='reportedDate')
+data['reportedEPS'] = data['reportedEPS'].astype(float)
+data['estimatedEPS'] = data['estimatedEPS'].astype(float)
+data['surprise'] = data['surprise'].astype(float)
+data['surprisePercentage'] = data['surprisePercentage'].astype(float)
+
+Prepare_X = data[['reportedEPS', 'estimatedEPS', 'surprise', 'surprisePercentage']] 
+X_squared = Prepare_X.apply(lambda x: x**2) 
+X_squared.columns = [col + '^2' for col in Prepare_X.columns]
+Prepare_X = pd.concat([Prepare_X, X_squared], axis=1)
+Prepare_X = sm.add_constant(Prepare_X)
+
+X = Prepare_X[['reportedEPS', 'estimatedEPS', 'surprise',
+                                        'reportedEPS^2', 'estimatedEPS^2']].to_numpy() #independent variables
+Y = data['PricePercentageChange'].to_numpy()  #dependent variable
+
+model = sm.OLS(Y, X).fit()
+print(model.summary())
+
+# Reset Teset
+print("Reset test:")
+print(smd.linear_reset(model, test_type='fitted', use_f=True))
+
+# Breusch-Pagan Test
+bp_test = het_breuschpagan(model.resid, model.model.exog)
+print("Test Breusch-Pagan:\nStatistic = %f, p-value = %f" % (bp_test[0], bp_test[1]))
